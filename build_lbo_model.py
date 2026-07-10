@@ -592,5 +592,7 @@ for sheet in [ws, su, om, fc, ds, rt]:
     sheet.sheet_view.showGridLines = False
     sheet.freeze_panes = "B4" if sheet != ws else "A1"
 
-wb.save("/Users/daniellee/Desktop/LBO_Model.xlsx")
-print("saved")
+import os
+out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LBO_Model.xlsx")
+wb.save(out_path)
+print(f"saved to {out_path}")
