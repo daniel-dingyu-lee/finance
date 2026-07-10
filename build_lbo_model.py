@@ -34,6 +34,7 @@ Design notes
 import os
 
 import openpyxl
+from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import column_index_from_string, get_column_letter
 
@@ -632,6 +633,121 @@ def build_returns_sheet(wb, a, su, om, ds):
     return ws
 
 
+# ==================================================================== #
+# SHEET 7: SENSITIVITY -- a 5x5 grid of MOIC and IRR across Entry and
+# Exit EV/EBITDA multiples, centered on the base-case multiples from
+# Assumptions.
+#
+# Why this can be closed-form instead of an Excel "Data Table": Entry
+# and Exit multiples don't feed the debt schedule at all (debt is sized
+# off EBITDA leverage multiples, not the purchase price), so the exit
+# EBITDA and exit net debt are identical for every cell in the grid --
+# only the purchase price (Sources & Uses) and exit equity value change.
+# That means MOIC algebraically simplifies to:
+#
+#   MOIC = (ExitEBITDA * exit_mult - NetDebtAtExit)
+#          / (EntryEBITDA * entry_mult * (1+txn_fee%) + TotalDebt*fin_fee% - TotalDebt)
+#
+# (the management-rollover term cancels out of both the numerator and
+# denominator). Every cell references the live Sources & Uses / Debt
+# Schedule / Operating Model cells, so the grid updates if you change
+# leverage, growth, margins, or rates on the Assumptions tab -- it only
+# has to be closed-form across the two axes actually being varied here.
+# Sensitizing leverage or growth instead would change the debt paydown
+# schedule itself and can't be captured this way.
+# ==================================================================== #
+def build_sensitivity_sheet(wb, a, su, om, ds):
+    A, S, O, D = "Assumptions", "Sources & Uses", "Operating Model", "Debt Schedule"
+    exit_col = YEAR_COLS[-1]
+    ws = wb.create_sheet("Sensitivity")
+    set_widths(ws, [24, 13, 13, 13, 13, 13, 13])
+    title(ws, "Sensitivity Analysis", 1)
+    ws.cell(
+        row=2, column=1,
+        value="Holds leverage, growth, margins, and rates fixed at their Assumptions-tab values; "
+              "varies only Entry and Exit EV/EBITDA multiples.",
+    ).font = NOTE_FONT
+
+    data_cols = ["C", "D", "E", "F", "G"]
+    offsets = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+    entry_ebitda = bref(S, su["entry_ebitda"])
+    total_debt = bref(S, su["total_debt"])
+    txn_fee_pct = bref(A, a["txn_fees_pct"])
+    fin_fee_pct = bref(A, a["fin_fees_pct"])
+    exit_ebitda = f"'{O}'!{exit_col}{om['ebitda']}"
+    net_debt_exit = f"'{D}'!{exit_col}{ds['net_debt']}"
+    hold_period = bref(A, a["hold_period"])
+    entry_mult_base = bref(A, a["entry_mult"])
+    exit_mult_base = bref(A, a["exit_mult"])
+
+    def offset_formula(base_ref, offset):
+        if offset == 0:
+            return f"={base_ref}"
+        sign = "+" if offset > 0 else "-"
+        return f"={base_ref}{sign}{abs(offset)}"
+
+    def moic_formula(entry_mult_ref, exit_mult_ref):
+        ev = f"{entry_ebitda}*{entry_mult_ref}"
+        uses = f"({ev}*(1+{txn_fee_pct})+{total_debt}*{fin_fee_pct})"
+        entry_equity = f"({uses}-{total_debt})"
+        exit_equity = f"({exit_ebitda}*{exit_mult_ref}-{net_debt_exit})"
+        return f"={exit_equity}/{entry_equity}"
+
+    # ---- MOIC grid ----
+    r = 4
+    section(ws, "MOIC — Entry Multiple (rows) vs Exit Multiple (columns)", r); r += 1
+    moic_header_row = r
+    label(ws, moic_header_row, 2, "MOIC", bold=True)
+    for col, offset in zip(data_cols, offsets):
+        calc(ws, moic_header_row, col_idx(col), offset_formula(exit_mult_base, offset), MULT, bold=True)
+    r += 1
+
+    moic_first_row = r
+    for offset in offsets:
+        calc(ws, r, 2, offset_formula(entry_mult_base, offset), MULT, bold=True)
+        entry_mult_ref = f"$B{r}"
+        for col in data_cols:
+            exit_mult_ref = f"{col}${moic_header_row}"
+            calc(ws, r, col_idx(col), moic_formula(entry_mult_ref, exit_mult_ref), MULT)
+        r += 1
+    moic_last_row = r - 1
+    r += 2
+
+    # ---- IRR grid: same axes, but each cell reads the MOIC computed
+    # directly above (same row offset within the MOIC grid) instead of
+    # re-deriving MOIC from scratch. ----
+    section(ws, "IRR — Entry Multiple (rows) vs Exit Multiple (columns)", r); r += 1
+    irr_header_row = r
+    label(ws, irr_header_row, 2, "IRR", bold=True)
+    for col, offset in zip(data_cols, offsets):
+        calc(ws, irr_header_row, col_idx(col), offset_formula(exit_mult_base, offset), MULT, bold=True)
+    r += 1
+
+    irr_first_row = r
+    for i, offset in enumerate(offsets):
+        calc(ws, r, 2, offset_formula(entry_mult_base, offset), MULT, bold=True)
+        moic_row = moic_first_row + i
+        for col in data_cols:
+            calc(ws, r, col_idx(col), f"=({col}{moic_row})^(1/{hold_period})-1", PCT1)
+        r += 1
+    irr_last_row = r - 1
+
+    # Heat-map coloring (red = low, yellow = mid, green = high) so both
+    # grids are readable at a glance.
+    for first_row, last_row in [(moic_first_row, moic_last_row), (irr_first_row, irr_last_row)]:
+        ws.conditional_formatting.add(
+            f"C{first_row}:G{last_row}",
+            ColorScaleRule(
+                start_type="min", start_color="F8696B",
+                mid_type="percentile", mid_value=50, mid_color="FFEB84",
+                end_type="max", end_color="63BE7B",
+            ),
+        )
+
+    return ws
+
+
 def main():
     wb = openpyxl.Workbook()
 
@@ -642,11 +758,12 @@ def main():
     ds_ws, ds = build_debt_schedule_sheet(wb, a, su, fcf, om)
     link_operating_model_interest(om_ws, om, ds)
     rt_ws = build_returns_sheet(wb, a, su, om, ds)
+    sens_ws = build_sensitivity_sheet(wb, a, su, om, ds)
 
     for ws in wb.worksheets:
         ws.sheet_view.showGridLines = False
     a_ws.freeze_panes = "A1"
-    for ws in (su_ws, om_ws, fcf_ws, ds_ws, rt_ws):
+    for ws in (su_ws, om_ws, fcf_ws, ds_ws, rt_ws, sens_ws):
         ws.freeze_panes = "B4"
 
     out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LBO_Model.xlsx")
