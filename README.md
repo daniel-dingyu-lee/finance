@@ -14,3 +14,18 @@ python3 build_lbo_model.py
 ```
 
 This writes `LBO_Model.xlsx` next to the script. Edit the yellow input cells on the Assumptions tab to change entry/exit multiples, leverage, growth, margins, etc. — the rest of the model recalculates automatically.
+
+## Private Credit Model Builder
+
+`build_private_credit_model.py` generates a formula-driven private credit (unitranche) model as an Excel workbook — Summary dashboard, Assumptions (Tranche A "First Out" / Tranche B "Last Out"), SOFR forward curve, quarterly Debt Schedule, Covenant testing (leverage & interest coverage), and lender Returns (IRR/MOIC) by tranche and blended. `Private_Credit_Model.xlsx` is the sample output with default assumptions.
+
+The Debt Schedule includes a cash sweep: excess free cash flow (EBITDA × FCF conversion % less cash interest and mandatory amortization) is swept sequentially — First Out paid down before Last Out — at par, accelerating principal repayment beyond the scheduled amortization.
+
+### How to run
+
+```
+pip install openpyxl
+python3 build_private_credit_model.py
+```
+
+This writes `Private_Credit_Model.xlsx` next to the script. Edit the yellow input cells on the Assumptions tab (spread, OID, leverage covenants, sweep %, exit year, etc.) — the rest of the model recalculates automatically.
