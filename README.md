@@ -44,3 +44,20 @@ python3 build_three_statement_dcf_model.py
 ```
 
 This writes `Three_Statement_DCF_Model.xlsx` next to the script. Edit the blue input cells on the Assumptions tab (tax rate, WACC, terminal growth, margins, growth rates, working capital days) — the rest of the model recalculates automatically.
+
+## Complex LBO Model Builder
+
+`build_complex_lbo_model.py` generates a more elaborate, quarterly-cadence LBO model as a companion to `build_lbo_model.py` (which stays as the simpler annual, single-term-loan reference model). `Complex_LBO_Model.xlsx` is the sample output with default assumptions.
+
+Capital structure, senior to junior: a Revolving Credit Facility (draws to cover shortfalls, swept clean first out of any surplus cash, with a commitment fee accruing on the undrawn balance), Term Loan A (amortizing senior secured, first priority for the excess-cash-flow sweep), Term Loan B (bullet/institutional, minimal mandatory amortization, second priority for the sweep), and Mezzanine/PIK Notes (subordinated, cash-pay + payment-in-kind coupon — PIK accrues into principal instead of being paid in cash, and isn't swept, consistent with call protection on real subordinated notes).
+
+The Debt Schedule tests Senior Secured Net Leverage and Interest Coverage covenants every quarter against trailing-twelve-month EBITDA and cash interest, with a stepped-down leverage covenant threshold over the hold. The Returns tab implements a tiered management promote: management's share of exit proceeds ratchets up once total MOIC crosses each tier threshold on the Assumptions tab, modeling a European-style "sweet equity" ratchet rather than a US-style GP catch-up waterfall.
+
+### How to run
+
+```
+pip install openpyxl
+python3 build_complex_lbo_model.py
+```
+
+This writes `Complex_LBO_Model.xlsx` next to the script. Edit the yellow input cells on the Assumptions tab (tranche leverage/spreads/amortization, SOFR, covenants, promote tiers, etc.) — the rest of the model recalculates automatically.
